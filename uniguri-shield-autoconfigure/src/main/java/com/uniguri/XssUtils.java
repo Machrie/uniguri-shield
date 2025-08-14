@@ -1,14 +1,20 @@
 package com.uniguri;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.uniguri.config.XssShieldProperties;
 import org.owasp.html.PolicyFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.uniguri.config.XssShieldProperties;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.util.HtmlUtils;
+import jakarta.servlet.http.HttpServletRequest;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -23,6 +29,7 @@ import java.util.stream.Stream;
 public class XssUtils {
 
     private static final Logger log = LoggerFactory.getLogger(XssUtils.class);
+    private static final ThreadLocal<RequestInfo> requestInfoHolder = new ThreadLocal<>();
 
     private static final Pattern[] XSS_PATTERNS = {
         // Script-related tags
@@ -55,10 +62,10 @@ public class XssUtils {
     private final PolicyFactory formInputSanitizer;
 
     private final boolean sanitizeCacheEnabled;
-    private final int sanitizeCacheMaxEntries;
-    private final java.util.concurrent.ConcurrentHashMap<String, String> sanitizeCache = new java.util.concurrent.ConcurrentHashMap<>();
-    private final java.util.concurrent.ConcurrentHashMap<String, String> strictSanitizeCache = new java.util.concurrent.ConcurrentHashMap<>();
-    private final java.util.concurrent.ConcurrentHashMap<String, String> formInputSanitizeCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Cache<String, String> sanitizeCache;
+    private final Cache<String, String> strictSanitizeCache;
+    private final Cache<String, String> formInputSanitizeCache;
+    private final XssShieldProperties.LogLevel logLevel;
     private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
 
     /**
@@ -76,7 +83,10 @@ public class XssUtils {
         this.strictHtmlSanitizer = strictHtmlSanitizer;
         this.formInputSanitizer = formInputSanitizer;
         this.sanitizeCacheEnabled = false;
-        this.sanitizeCacheMaxEntries = 1000;
+        this.sanitizeCache = null;
+        this.strictSanitizeCache = null;
+        this.formInputSanitizeCache = null;
+        this.logLevel = XssShieldProperties.LogLevel.WARN;
     }
 
     /**
@@ -93,7 +103,17 @@ public class XssUtils {
         this.strictHtmlSanitizer = strictHtmlSanitizer;
         this.formInputSanitizer = formInputSanitizer;
         this.sanitizeCacheEnabled = properties != null && properties.getCache() != null && properties.getCache().isSanitizeEnabled();
-        this.sanitizeCacheMaxEntries = properties != null && properties.getCache() != null ? properties.getCache().getSanitizeMaxEntries() : 1000;
+        int sanitizeCacheMaxEntries = properties != null && properties.getCache() != null ? properties.getCache().getSanitizeMaxEntries() : 1000;
+        if (this.sanitizeCacheEnabled) {
+            this.sanitizeCache = Caffeine.newBuilder().maximumSize(sanitizeCacheMaxEntries).build();
+            this.strictSanitizeCache = Caffeine.newBuilder().maximumSize(sanitizeCacheMaxEntries).build();
+            this.formInputSanitizeCache = Caffeine.newBuilder().maximumSize(sanitizeCacheMaxEntries).build();
+        } else {
+            this.sanitizeCache = null;
+            this.strictSanitizeCache = null;
+            this.formInputSanitizeCache = null;
+        }
+        this.logLevel = properties != null ? properties.getLogLevel() : XssShieldProperties.LogLevel.WARN;
     }
 
     /**
@@ -107,11 +127,7 @@ public class XssUtils {
             return null;
         }
         if (sanitizeCacheEnabled) {
-            String cached = sanitizeCache.get(input);
-            if (cached != null) return cached;
-            String result = htmlSanitizer.sanitize(input);
-            putWithLimit(sanitizeCache, input, result);
-            return result;
+            return sanitizeCache.get(input, k -> htmlSanitizer.sanitize(k));
         }
         return htmlSanitizer.sanitize(input);
     }
@@ -127,11 +143,7 @@ public class XssUtils {
             return null;
         }
         if (sanitizeCacheEnabled) {
-            String cached = strictSanitizeCache.get(input);
-            if (cached != null) return cached;
-            String result = strictHtmlSanitizer.sanitize(input);
-            putWithLimit(strictSanitizeCache, input, result);
-            return result;
+            return strictSanitizeCache.get(input, k -> strictHtmlSanitizer.sanitize(k));
         }
         return strictHtmlSanitizer.sanitize(input);
     }
@@ -147,20 +159,31 @@ public class XssUtils {
             return null;
         }
         if (sanitizeCacheEnabled) {
-            String cached = formInputSanitizeCache.get(input);
-            if (cached != null) return cached;
-            String result = formInputSanitizer.sanitize(input);
-            putWithLimit(formInputSanitizeCache, input, result);
-            return result;
+            return formInputSanitizeCache.get(input, k -> formInputSanitizer.sanitize(k));
         }
         return formInputSanitizer.sanitize(input);
     }
 
-    private void putWithLimit(java.util.concurrent.ConcurrentHashMap<String, String> cache, String key, String value) {
-        if (cache.size() >= sanitizeCacheMaxEntries) {
-            cache.clear();
+    /**
+     * Handles sanitization errors based on the configured policy.
+     * <p>
+     * 설정된 정책에 따라 살균 오류를 처리합니다.
+     *
+     * @param ex         The exception that occurred. / 발생한 예외
+     * @param properties The configuration properties. / 설정 프로퍼티
+     * @param value      The original value that caused the error. / 오류를 발생시킨 원본 값
+     * @return The value to return, based on the policy. / 정책에 따라 반환될 값
+     */
+    public String handleSanitizationError(Exception ex, XssShieldProperties properties, String value) {
+        XssShieldProperties.OnError onError = properties.getOnError();
+        if (onError == XssShieldProperties.OnError.THROW_EXCEPTION) {
+            throw new RuntimeException("XSS sanitization failed for value: " + value, ex);
         }
-        cache.put(key, value);
+        if (onError == XssShieldProperties.OnError.LOG_AND_CONTINUE) {
+            log.error("XSS sanitization failed for value. Returning original value. Details: {}", value, ex);
+        }
+        // For RETURN_ORIGINAL, we just return the original value silently.
+        return value;
     }
 
     /**
@@ -186,30 +209,85 @@ public class XssUtils {
         if (input == null) {
             return false;
         }
+        return checkXssPatterns(input);
+    }
 
-        // URL Decode for thorough check
-        String decodedInput;
-        try {
-            decodedInput = java.net.URLDecoder.decode(input, "UTF-8");
-        } catch (Exception e) {
-            // If decoding fails, use the original input
-            log.warn("URL decoding failed for input string. Proceeding with original input.", e);
-            decodedInput = input;
+    private boolean checkXssPatterns(String value) {
+        // 1. Plain text check
+        if (findXssPattern(value)) {
+            return true;
         }
 
-
-        for (Pattern pattern : XSS_PATTERNS) {
-            Matcher matcher = pattern.matcher(decodedInput);
-            if (matcher.find()) {
-                String uri = getCurrentRequestUri();
-                String ip = getCurrentClientIp();
-                log.warn("XSS detected - URI: {}, IP: {}, Pattern: {}", uri, ip, pattern.pattern());
+        // 2. HTML entity decoding
+        String decodedHtml = HtmlUtils.htmlUnescape(value);
+        if (!decodedHtml.equals(value) && findXssPattern(decodedHtml)) {
+            log.warn("XSS pattern found after HTML entity decoding.");
+            return true;
+        }
+        
+        // 3. URL decoding
+        try {
+            String decodedUrl = URLDecoder.decode(value, StandardCharsets.UTF_8);
+            if (!decodedUrl.equals(value) && findXssPattern(decodedUrl)) {
+                log.warn("XSS pattern found after URL decoding.");
                 return true;
             }
+        } catch (IllegalArgumentException e) {
+            // Ignore malformed URL encoding
+        }
+
+        // 4. Base64 decoding
+        try {
+            if (value.matches("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")) {
+                byte[] decodedBytes = Base64.getDecoder().decode(value);
+                String decodedBase64 = new String(decodedBytes, StandardCharsets.UTF_8);
+                if (findXssPattern(decodedBase64)) {
+                    log.warn("XSS pattern found after Base64 decoding.");
+                    return true;
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            // Not a valid Base64 string, ignore.
         }
 
         return false;
     }
+
+    private boolean findXssPattern(String input) {
+        if (input == null) {
+            return false;
+        }
+
+        for (Pattern pattern : XSS_PATTERNS) {
+            Matcher matcher = pattern.matcher(input);
+            if (matcher.find()) {
+                RequestInfo info = getRequestInfo();
+                String message = "XSS detected - URI: {}, IP: {}, User-Agent: {}, Pattern: {}, Matched: '{}'";
+                Object[] args;
+                if (info != null) {
+                    args = new Object[]{info.getUri(), info.getClientIp(), info.getUserAgent(), pattern.pattern(), matcher.group()};
+                } else {
+                    message = "XSS detected - Pattern: {}, Matched: '{}'";
+                    args = new Object[]{pattern.pattern(), matcher.group()};
+                }
+
+                switch (logLevel) {
+                    case INFO:
+                        log.info(message, args);
+                        break;
+                    case WARN:
+                        log.warn(message, args);
+                        break;
+                    case ERROR:
+                        log.error(message, args);
+                        break;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
 
     /**
      * Checks if a string is safe from XSS attacks.
@@ -279,13 +357,8 @@ public class XssUtils {
      * 현재 요청 URI를 반환합니다.
      */
     public String getCurrentRequestUri() {
-        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-        if (attributes == null) return null;
-        try {
-            return attributes.getRequest().getRequestURI();
-        } catch (Exception ignore) {
-            return null;
-        }
+        RequestInfo info = getRequestInfo();
+        return (info != null) ? info.getUri() : null;
     }
 
     /**
@@ -294,17 +367,61 @@ public class XssUtils {
      * 현재 요청에서 클라이언트 IP를 반환합니다.
      */
     public String getCurrentClientIp() {
-        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-        if (attributes == null) return null;
-        try {
-            String ip = attributes.getRequest().getHeader("X-Forwarded-For");
+        RequestInfo info = getRequestInfo();
+        return (info != null) ? info.getClientIp() : null;
+    }
+
+    private RequestInfo getRequestInfo() {
+        if (requestInfoHolder.get() == null) {
+            ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attributes != null) {
+                requestInfoHolder.set(new RequestInfo(attributes.getRequest()));
+            } else {
+                // In a non-request context, set a null-object to avoid repeated lookups
+                requestInfoHolder.set(new RequestInfo(null));
+            }
+        }
+        return requestInfoHolder.get();
+    }
+
+    public static void clearRequestInfo() {
+        requestInfoHolder.remove();
+    }
+
+    public static class RequestInfo {
+        private final String uri;
+        private final String clientIp;
+        private final String userAgent;
+
+        public RequestInfo(HttpServletRequest request) {
+            if (request == null) {
+                this.uri = null;
+                this.clientIp = null;
+                this.userAgent = null;
+                return;
+            }
+            this.uri = request.getRequestURI();
+            this.userAgent = request.getHeader("User-Agent");
+
+            String ip = request.getHeader("X-Forwarded-For");
             if (ip != null && !ip.isBlank()) {
                 int idx = ip.indexOf(',');
-                return idx > 0 ? ip.substring(0, idx).trim() : ip.trim();
+                this.clientIp = idx > 0 ? ip.substring(0, idx).trim() : ip.trim();
+            } else {
+                this.clientIp = request.getRemoteAddr();
             }
-            return attributes.getRequest().getRemoteAddr();
-        } catch (Exception ignore) {
-            return null;
+        }
+
+        public String getUri() {
+            return uri;
+        }
+
+        public String getClientIp() {
+            return clientIp;
+        }
+
+        public String getUserAgent() {
+            return userAgent;
         }
     }
 }

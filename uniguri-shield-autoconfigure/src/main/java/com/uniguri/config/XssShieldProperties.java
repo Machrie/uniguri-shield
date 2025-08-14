@@ -3,6 +3,9 @@ package com.uniguri.config;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -22,6 +25,7 @@ import org.springframework.core.Ordered;
 @ConfigurationProperties(prefix = "xss.shield")
 @ConditionalOnProperty(prefix = "xss.shield", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class XssShieldProperties {
+    private static final Logger log = LoggerFactory.getLogger(XssShieldProperties.class);
 
     /**
      * Enables or disables the XSS Shield globally.
@@ -73,6 +77,35 @@ public class XssShieldProperties {
      */
     private OnError onError = OnError.LOG_AND_CONTINUE;
 
+    /**
+     * Log level for reporting detected XSS patterns.
+     * <p>
+     * XSS 패턴 탐지 시 기록할 로그 레벨입니다.
+     * 기본값: WARN
+     */
+    private LogLevel logLevel = LogLevel.WARN;
+
+    @PostConstruct
+    public void validate() {
+        log.info("Validating XssShieldProperties...");
+        if (filter.getOrder() < 0) {
+            log.warn("xss.shield.filter.order should be non-negative. It's recommended to use a value higher than Spring Security's filter orders.");
+        }
+        if (cache.getSanitizeMaxEntries() < 1) {
+            log.warn("xss.shield.cache.sanitize-max-entries is {}, which is less than 1. Setting to default 1000.", cache.getSanitizeMaxEntries());
+            cache.setSanitizeMaxEntries(1000);
+        }
+        if (cache.getExcludeMaxEntries() < 1) {
+            log.warn("xss.shield.cache.exclude-max-entries is {}, which is less than 1. Setting to default 10000.", cache.getExcludeMaxEntries());
+            cache.setExcludeMaxEntries(10000);
+        }
+        if (json.getApiPatterns() == null || json.getApiPatterns().isEmpty()) {
+            log.info("xss.shield.json.api-patterns is empty. Applying default patterns: [\"/api/**\", \"/v1/**\", \"/v2/**\"]");
+            json.setApiPatterns(Arrays.asList("/api/**", "/v1/**", "/v2/**"));
+        }
+        log.info("XssShieldProperties validation complete.");
+    }
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -109,6 +142,14 @@ public class XssShieldProperties {
 
     public void setPolicyLevel(PolicyLevel policyLevel) {
         this.policyLevel = policyLevel;
+    }
+
+    public LogLevel getLogLevel() {
+        return logLevel;
+    }
+
+    public void setLogLevel(LogLevel logLevel) {
+        this.logLevel = logLevel;
     }
 
     /**
@@ -273,6 +314,13 @@ public class XssShieldProperties {
          */
         private int sanitizeMaxEntries = 1000;
 
+        /**
+         * Maximum number of entries to keep in the exclude-pattern cache.
+         * <p>
+         * 제외 패턴 캐시의 최대 엔트리 수입니다. (기본값: 10000)
+         */
+        private int excludeMaxEntries = 10000;
+
         public boolean isSanitizeEnabled() {
             return sanitizeEnabled;
         }
@@ -287,6 +335,14 @@ public class XssShieldProperties {
 
         public void setSanitizeMaxEntries(int sanitizeMaxEntries) {
             this.sanitizeMaxEntries = sanitizeMaxEntries;
+        }
+
+        public int getExcludeMaxEntries() {
+            return excludeMaxEntries;
+        }
+
+        public void setExcludeMaxEntries(int excludeMaxEntries) {
+            this.excludeMaxEntries = excludeMaxEntries;
         }
     }
 
@@ -310,6 +366,17 @@ public class XssShieldProperties {
         STRICT,
         NORMAL,
         LENIENT
+    }
+
+    /**
+     * Log level for XSS detection events.
+     * <p>
+     * XSS 탐지 이벤트에 대한 로그 레벨입니다.
+     */
+    public enum LogLevel {
+        INFO,
+        WARN,
+        ERROR
     }
 }
 

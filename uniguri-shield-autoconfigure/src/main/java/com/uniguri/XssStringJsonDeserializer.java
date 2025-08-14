@@ -11,6 +11,8 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.uniguri.config.XssShieldProperties;
+import java.lang.reflect.Field;
+
 
 /**
  * Custom JsonDeserializer that sanitizes String values to prevent XSS.
@@ -54,22 +56,28 @@ public class XssStringJsonDeserializer extends JsonDeserializer<String> {
         }
 
         try {
+            // Check for @XssIgnore annotation on the field
+            String currentName = jsonParser.currentName();
+            Object currentValue = jsonParser.getCurrentValue();
+            if (currentName != null && currentValue != null) {
+                Field field = currentValue.getClass().getDeclaredField(currentName);
+                if (field.isAnnotationPresent(XssIgnore.class)) {
+                    return value;
+                }
+            }
+        } catch (NoSuchFieldException e) {
+            // Field not found, proceed with sanitization
+        } catch (Exception e) {
+            log.error("Error checking for @XssIgnore annotation, proceeding with sanitization.", e);
+        }
+
+        try {
             if (xssUtils.isApiRequestForCurrentRequest(properties.getJson().getApiPatterns())) {
                 return xssUtils.strictSanitize(value);
             }
             return xssUtils.sanitize(value);
         } catch (Exception ex) {
-            XssShieldProperties.OnError onError = properties.getOnError();
-            if (onError == XssShieldProperties.OnError.THROW_EXCEPTION) {
-                throw new IOException("XSS sanitization failed", ex);
-            }
-            if (onError == XssShieldProperties.OnError.LOG_AND_CONTINUE) {
-                String uri = xssUtils.getCurrentRequestUri();
-                String ip = xssUtils.getCurrentClientIp();
-                log.error("XSS sanitization failed. Returning original value. URI: {}, IP: {}", uri, ip, ex);
-            }
-            // RETURN_ORIGINAL: just return original silently
-            return value;
+            return xssUtils.handleSanitizationError(ex, properties, value);
         }
     }
 }

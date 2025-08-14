@@ -2,6 +2,8 @@ package com.uniguri.config;
 
 import com.uniguri.XssStringJsonDeserializer;
 import com.uniguri.XssUtils;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -28,6 +30,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 
@@ -54,12 +57,12 @@ public class XssShieldAutoConfiguration {
      * @param formInputSanitizer  폼 입력용 Sanitizer
      * @return XssUtils 인스턴스
      */
-    @Bean("xssShieldXssUtils")
+    @Bean("com.uniguri.xssShield.xssUtils")
     @ConditionalOnMissingBean
     public XssUtils xssUtils(
-            @Qualifier("xssShieldHtmlSanitizer") PolicyFactory htmlSanitizer,
-            @Qualifier("xssShieldStrictHtmlSanitizer") PolicyFactory strictHtmlSanitizer,
-            @Qualifier("xssShieldFormInputSanitizer") PolicyFactory formInputSanitizer,
+            @Qualifier("com.uniguri.xssShield.htmlSanitizer") PolicyFactory htmlSanitizer,
+            @Qualifier("com.uniguri.xssShield.strictHtmlSanitizer") PolicyFactory strictHtmlSanitizer,
+            @Qualifier("com.uniguri.xssShield.formInputSanitizer") PolicyFactory formInputSanitizer,
             XssShieldProperties properties) {
         log.info("Initializing XssUtils bean.");
         return new XssUtils(htmlSanitizer, strictHtmlSanitizer, formInputSanitizer, properties);
@@ -70,8 +73,8 @@ public class XssShieldAutoConfiguration {
      * <p>
      * 경로 매칭을 위한 AntPathMatcher 싱글톤 빈입니다.
      */
-    @Bean("xssShieldAntPathMatcher")
-    @ConditionalOnMissingBean(name = "xssShieldAntPathMatcher")
+    @Bean("com.uniguri.xssShield.antPathMatcher")
+    @ConditionalOnMissingBean(name = "com.uniguri.xssShield.antPathMatcher")
     public AntPathMatcher antPathMatcher() {
         return new AntPathMatcher();
     }
@@ -84,15 +87,15 @@ public class XssShieldAutoConfiguration {
      * @param properties XSS 설정 프로퍼티
      * @return FilterRegistrationBean 인스턴스
      */
-    @Bean("xssShieldCustomXssFilter")
+    @Bean("com.uniguri.xssShield.customXssFilter")
     @ConditionalOnProperty(prefix = "xss.shield.filter", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public FilterRegistrationBean<Filter> customXssFilter(XssUtils xssUtils, XssShieldProperties properties, @Qualifier("xssShieldAntPathMatcher") AntPathMatcher antPathMatcher) {
+    public FilterRegistrationBean<Filter> customXssFilter(XssUtils xssUtils, XssShieldProperties properties, @Qualifier("com.uniguri.xssShield.antPathMatcher") AntPathMatcher antPathMatcher) {
         log.info("Registering CustomXssFilter.");
         FilterRegistrationBean<Filter> registration = new FilterRegistrationBean<>();
         registration.setFilter(new CustomXssFilter(xssUtils, properties, antPathMatcher));
         registration.setOrder(properties.getFilter().getOrder());
         registration.addUrlPatterns("/*");
-        registration.setName("xssShieldCustomXssFilter");
+        registration.setName("com.uniguri.xssShield.customXssFilter");
         return registration;
     }
 
@@ -104,7 +107,7 @@ public class XssShieldAutoConfiguration {
      * @param properties XSS 설정 프로퍼티
      * @return Jackson2ObjectMapperBuilderCustomizer 인스턴스
      */
-    @Bean("xssShieldJacksonCustomizer")
+    @Bean("com.uniguri.xssShield.jacksonCustomizer")
     @ConditionalOnProperty(prefix = "xss.shield.json", name = "enabled", havingValue = "true", matchIfMissing = true)
     public Jackson2ObjectMapperBuilderCustomizer jackson2ObjectMapperBuilderCustomizer(XssUtils xssUtils, XssShieldProperties properties) {
         log.info("Registering JacksonXssConfig customizer.");
@@ -120,8 +123,8 @@ public class XssShieldAutoConfiguration {
      *
      * @return PolicyFactory 인스턴스
      */
-    @Bean("xssShieldHtmlSanitizer")
-    @ConditionalOnMissingBean(name = "xssShieldHtmlSanitizer")
+    @Bean("com.uniguri.xssShield.htmlSanitizer")
+    @ConditionalOnMissingBean(name = "com.uniguri.xssShield.htmlSanitizer")
     public PolicyFactory htmlSanitizer(XssShieldProperties properties) {
         log.info("Initializing 'htmlSanitizer' bean.");
         XssShieldProperties.PolicyLevel level = properties.getPolicyLevel();
@@ -172,8 +175,8 @@ public class XssShieldAutoConfiguration {
      *
      * @return PolicyFactory 인스턴스
      */
-    @Bean("xssShieldStrictHtmlSanitizer")
-    @ConditionalOnMissingBean(name = "xssShieldStrictHtmlSanitizer")
+    @Bean("com.uniguri.xssShield.strictHtmlSanitizer")
+    @ConditionalOnMissingBean(name = "com.uniguri.xssShield.strictHtmlSanitizer")
     public PolicyFactory strictHtmlSanitizer() {
         log.info("Initializing 'strictHtmlSanitizer' bean.");
         return new HtmlPolicyBuilder().toFactory();
@@ -185,8 +188,8 @@ public class XssShieldAutoConfiguration {
      *
      * @return PolicyFactory 인스턴스
      */
-    @Bean("xssShieldFormInputSanitizer")
-    @ConditionalOnMissingBean(name = "xssShieldFormInputSanitizer")
+    @Bean("com.uniguri.xssShield.formInputSanitizer")
+    @ConditionalOnMissingBean(name = "com.uniguri.xssShield.formInputSanitizer")
     public PolicyFactory formInputSanitizer(XssShieldProperties properties) {
         log.info("Initializing 'formInputSanitizer' bean.");
         if (properties.getPolicyLevel() == XssShieldProperties.PolicyLevel.STRICT) {
@@ -201,7 +204,7 @@ public class XssShieldAutoConfiguration {
         private final XssUtils xssUtils;
         private final XssShieldProperties properties;
         private final AntPathMatcher pathMatcher;
-        private final Map<String, Boolean> excludeCache;
+        private final Cache<String, Boolean> excludeCache;
         private static final Set<String> STATIC_EXTENSIONS = Set.of(
                 ".css", ".js", ".map", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico"
         );
@@ -210,23 +213,30 @@ public class XssShieldAutoConfiguration {
             this.xssUtils = xssUtils;
             this.properties = properties;
             this.pathMatcher = pathMatcher;
-            this.excludeCache = Collections.synchronizedMap(new LruCache<>(10000));
+            this.excludeCache = Caffeine.newBuilder()
+                .maximumSize(properties.getCache().getExcludeMaxEntries())
+                .expireAfterWrite(1, TimeUnit.HOURS)
+                .build();
         }
 
         @Override
         public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
                 throws IOException, ServletException {
-            if (request instanceof HttpServletRequest httpRequest) {
-                    String requestURI = httpRequest.getRequestURI();
-                    if (shouldSkipFiltering(requestURI, properties.getFilter().getExcludePatterns())) {
-                        chain.doFilter(request, response);
-                        return;
-                    }
+            try {
+                if (request instanceof HttpServletRequest httpRequest) {
+                        String requestURI = httpRequest.getRequestURI();
+                        if (shouldSkipFiltering(requestURI, properties.getFilter().getExcludePatterns())) {
+                            chain.doFilter(request, response);
+                            return;
+                        }
 
-                    XssRequestWrapper wrappedRequest = new XssRequestWrapper(httpRequest, xssUtils, properties);
-                    chain.doFilter(wrappedRequest, response);
-            } else {
-                chain.doFilter(request, response);
+                        XssRequestWrapper wrappedRequest = new XssRequestWrapper(httpRequest, xssUtils, properties);
+                        chain.doFilter(wrappedRequest, response);
+                } else {
+                    chain.doFilter(request, response);
+                }
+            } finally {
+                XssUtils.clearRequestInfo();
             }
         }
 
@@ -240,7 +250,7 @@ public class XssShieldAutoConfiguration {
                     return true;
                 }
             }
-            Boolean cached = excludeCache.get(requestURI);
+            Boolean cached = excludeCache.getIfPresent(requestURI);
             if (cached != null) {
                 return cached;
             }
@@ -256,18 +266,6 @@ public class XssShieldAutoConfiguration {
             return false;
         }
 
-        // Simple LRU cache based on LinkedHashMap with access order
-        private static class LruCache<K, V> extends LinkedHashMap<K, V> {
-            private final int capacity;
-            LruCache(int capacity) {
-                super(capacity, 0.75f, true);
-                this.capacity = capacity;
-            }
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
-                return size() > capacity;
-            }
-        }
     }
 
     static class XssRequestWrapper extends HttpServletRequestWrapper {
@@ -307,15 +305,7 @@ public class XssShieldAutoConfiguration {
                 }
                 return xssUtils.sanitizeFormInput(value);
             } catch (Exception ex) {
-                XssShieldProperties.OnError onError = properties.getOnError();
-                if (onError == XssShieldProperties.OnError.THROW_EXCEPTION) {
-                    throw new RuntimeException("XSS sanitization failed", ex);
-                }
-                if (onError == XssShieldProperties.OnError.LOG_AND_CONTINUE) {
-                    log.error("XSS sanitization failed. Returning original value.", ex);
-                }
-                // RETURN_ORIGINAL: just return the original silently
-                return value;
+                return xssUtils.handleSanitizationError(ex, properties, value);
             }
         }
 
