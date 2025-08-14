@@ -1,0 +1,15 @@
+plugins {
+    `java-library`
+}
+
+java {
+    withSourcesJar()
+    withJavadocJar()
+}
+
+group = "com.uniguri"
+version = rootProject.version
+
+dependencies {
+    api(project(":xss-shield-spring-boot-autoconfigure"))
+}

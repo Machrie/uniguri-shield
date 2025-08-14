@@ -1,0 +1,17 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+    plugins {
+        id("io.spring.dependency-management") version "1.1.6"
+    }
+}
+
+rootProject.name = "uniguri-shield"
+
+include(
+    "xss-shield-spring-boot-autoconfigure",
+    "xss-shield-spring-boot-starter"
+)
+

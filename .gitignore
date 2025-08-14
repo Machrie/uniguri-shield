@@ -1,0 +1,51 @@
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+Thumbs.db
+
+# IDE / Editors
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.project
+.classpath
+.settings/
+
+# Build outputs
+.gradle/
+build/
+out/
+bin/
+target/
+**/build/
+**/out/
+**/bin/
+**/target/
+
+# Keep Gradle Wrapper (do not ignore)
+!gradlew
+!gradlew.bat
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# Logs / Reports
+*.log
+**/reports/
+hs_err_pid*
+replay_pid*
+
+# Coverage
+**/jacoco.exec
+**/jacocoTest.exec
+**/jacoco/*.exec
+
+# Local env / misc
+.env
+.env.*
+*.local
+*.class
+
