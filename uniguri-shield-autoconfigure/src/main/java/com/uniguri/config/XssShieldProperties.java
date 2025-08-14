@@ -49,7 +49,7 @@ public class XssShieldProperties {
      * <p>
      * XSS 패턴 탐지(로깅/모니터링 전용) 설정입니다.
      */
-    private final PatternDetectionConfig patternDetection = new PatternDetectionConfig();
+    // PatternDetectionConfig removed (logging-only, low practical value)
 
     /**
      * Configuration for caching strategies.
@@ -57,6 +57,13 @@ public class XssShieldProperties {
      * 캐싱 전략 설정입니다.
      */
     private final CacheConfig cache = new CacheConfig();
+
+    /**
+     * Preset policy level for sanitization strength.
+     * <p>
+     * 살균 정책 강도 프리셋입니다.
+     */
+    private PolicyLevel policyLevel = PolicyLevel.NORMAL;
 
     /**
      * Error handling policy when sanitization fails.
@@ -82,9 +89,7 @@ public class XssShieldProperties {
         return json;
     }
 
-    public PatternDetectionConfig getPatternDetection() {
-        return patternDetection;
-    }
+    // getPatternDetection() removed
 
     public CacheConfig getCache() {
         return cache;
@@ -96,6 +101,14 @@ public class XssShieldProperties {
 
     public void setOnError(OnError onError) {
         this.onError = onError;
+    }
+
+    public PolicyLevel getPolicyLevel() {
+        return policyLevel;
+    }
+
+    public void setPolicyLevel(PolicyLevel policyLevel) {
+        this.policyLevel = policyLevel;
     }
 
     /**
@@ -162,13 +175,6 @@ public class XssShieldProperties {
             )
         );
 
-        /**
-         * A list of request parameter names to skip sanitization for.
-         * <p>
-         * 살균을 제외할 요청 파라미터 이름 목록입니다.
-         */
-        private List<String> whitelistParameters = new ArrayList<>();
-
         public boolean isEnabled() {
             return enabled;
         }
@@ -183,14 +189,6 @@ public class XssShieldProperties {
 
         public void setExcludePatterns(List<String> excludePatterns) {
             this.excludePatterns = excludePatterns;
-        }
-
-        public List<String> getWhitelistParameters() {
-            return whitelistParameters;
-        }
-
-        public void setWhitelistParameters(List<String> whitelistParameters) {
-            this.whitelistParameters = whitelistParameters;
         }
 
         public int getOrder() {
@@ -253,24 +251,7 @@ public class XssShieldProperties {
      * <p>
      * 패턴 탐지 설정입니다.
      */
-    public static class PatternDetectionConfig {
-        /**
-         * Enables logging/monitoring of XSS pattern detection.
-         * Does not affect sanitization behavior.
-         * <p>
-         * XSS 패턴 탐지 로깅/모니터링을 활성화합니다.
-         * 살균 동작에는 영향을 주지 않습니다. (기본값: false)
-         */
-        private boolean enabled = false;
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-    }
+    // PatternDetectionConfig removed
 
     /**
      * Caching configuration.
@@ -318,6 +299,17 @@ public class XssShieldProperties {
         LOG_AND_CONTINUE,
         THROW_EXCEPTION,
         RETURN_ORIGINAL
+    }
+
+    /**
+     * Preset levels for policy strength.
+     * <p>
+     * 정책 강도 프리셋입니다.
+     */
+    public enum PolicyLevel {
+        STRICT,
+        NORMAL,
+        LENIENT
     }
 }
 

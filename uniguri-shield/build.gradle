@@ -11,7 +11,7 @@ group = "com.uniguri"
 version = rootProject.version
 
 dependencies {
-    api project(":xss-shield-spring-boot-autoconfigure")
+    api project(":uniguri-shield-autoconfigure")
 }
 
 

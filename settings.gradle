@@ -10,9 +10,11 @@ pluginManagement {
 
 rootProject.name = "uniguri-shield"
 
-include(
-    "xss-shield-spring-boot-autoconfigure",
-    "xss-shield-spring-boot-starter"
-)
+// Modules (physical directories renamed)
+include("uniguri-shield-autoconfigure")
+project(":uniguri-shield-autoconfigure").projectDir = file("uniguri-shield-autoconfigure")
+
+include("uniguri-shield")
+project(":uniguri-shield").projectDir = file("uniguri-shield")
 
 

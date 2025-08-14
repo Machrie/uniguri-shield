@@ -26,7 +26,10 @@ import org.springframework.util.AntPathMatcher;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
+import java.util.Set;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 
 /**
  * XSS Shield의 자동 구성을 담당하는 메인 클래스입니다.
@@ -119,8 +122,33 @@ public class XssShieldAutoConfiguration {
      */
     @Bean("xssShieldHtmlSanitizer")
     @ConditionalOnMissingBean(name = "xssShieldHtmlSanitizer")
-    public PolicyFactory htmlSanitizer() {
+    public PolicyFactory htmlSanitizer(XssShieldProperties properties) {
         log.info("Initializing 'htmlSanitizer' bean.");
+        XssShieldProperties.PolicyLevel level = properties.getPolicyLevel();
+        if (level == XssShieldProperties.PolicyLevel.STRICT) {
+            return new HtmlPolicyBuilder().toFactory();
+        }
+        if (level == XssShieldProperties.PolicyLevel.LENIENT) {
+            return new HtmlPolicyBuilder()
+                    .allowElements("p", "br", "strong", "b", "em", "i", "u", "span", "div")
+                    .allowElements("ul", "ol", "li")
+                    .allowElements("h1", "h2", "h3", "h4", "h5", "h6")
+                    .allowElements("table", "thead", "tbody", "tr", "td", "th")
+                    .allowElements("a")
+                    .allowAttributes("href").onElements("a")
+                    .allowUrlProtocols("http", "https", "mailto")
+                    .allowElements("img")
+                    .allowAttributes("src", "alt", "width", "height").onElements("img")
+                    .allowUrlProtocols("http", "https", "data")
+                    .allowAttributes("class", "id").globally()
+                    .allowAttributes("style").matching(
+                            java.util.regex.Pattern.compile(
+                                    "(?:(?:color|background-color|font-size|font-weight|text-align|margin|padding|border|width|height)\\s*:\\s*[a-zA-Z0-9\\s#%.,()-]+(?:\\s*;\\s*)?)*"
+                            )
+                    ).globally()
+                    .toFactory();
+        }
+        // NORMAL (default)
         return new HtmlPolicyBuilder()
                 .allowElements("p", "br", "strong", "b", "em", "i", "u", "span", "div")
                 .allowElements("ul", "ol", "li")
@@ -159,8 +187,11 @@ public class XssShieldAutoConfiguration {
      */
     @Bean("xssShieldFormInputSanitizer")
     @ConditionalOnMissingBean(name = "xssShieldFormInputSanitizer")
-    public PolicyFactory formInputSanitizer() {
+    public PolicyFactory formInputSanitizer(XssShieldProperties properties) {
         log.info("Initializing 'formInputSanitizer' bean.");
+        if (properties.getPolicyLevel() == XssShieldProperties.PolicyLevel.STRICT) {
+            return new HtmlPolicyBuilder().toFactory();
+        }
         return new HtmlPolicyBuilder()
                 .allowElements("strong", "b", "em", "i", "br")
                 .toFactory();
@@ -170,12 +201,16 @@ public class XssShieldAutoConfiguration {
         private final XssUtils xssUtils;
         private final XssShieldProperties properties;
         private final AntPathMatcher pathMatcher;
-        private final java.util.concurrent.ConcurrentHashMap<String, Boolean> excludeCache = new java.util.concurrent.ConcurrentHashMap<>();
+        private final Map<String, Boolean> excludeCache;
+        private static final Set<String> STATIC_EXTENSIONS = Set.of(
+                ".css", ".js", ".map", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico"
+        );
 
         CustomXssFilter(XssUtils xssUtils, XssShieldProperties properties, AntPathMatcher pathMatcher) {
             this.xssUtils = xssUtils;
             this.properties = properties;
             this.pathMatcher = pathMatcher;
+            this.excludeCache = Collections.synchronizedMap(new LruCache<>(10000));
         }
 
         @Override
@@ -198,6 +233,13 @@ public class XssShieldAutoConfiguration {
         private boolean shouldSkipFiltering(String requestURI, List<String> patterns) {
             if (requestURI == null) return false;
             if (patterns == null || patterns.isEmpty()) return false;
+            // Fast path: static resource extensions
+            for (String ext : STATIC_EXTENSIONS) {
+                if (requestURI.endsWith(ext)) {
+                    excludeCache.put(requestURI, true);
+                    return true;
+                }
+            }
             Boolean cached = excludeCache.get(requestURI);
             if (cached != null) {
                 return cached;
@@ -211,10 +253,20 @@ public class XssShieldAutoConfiguration {
                 }
             }
             excludeCache.put(requestURI, false);
-            if (excludeCache.size() > 10000) {
-                excludeCache.clear();
-            }
             return false;
+        }
+
+        // Simple LRU cache based on LinkedHashMap with access order
+        private static class LruCache<K, V> extends LinkedHashMap<K, V> {
+            private final int capacity;
+            LruCache(int capacity) {
+                super(capacity, 0.75f, true);
+                this.capacity = capacity;
+            }
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
+                return size() > capacity;
+            }
         }
     }
 
@@ -247,17 +299,8 @@ public class XssShieldAutoConfiguration {
 
         private String sanitizeValue(String value) {
             if (value == null) return null;
-            // Whitelist parameter names skip
-            String paramName = null;
-            try {
-                // best-effort extraction
-                paramName = getParameterNameFromStack();
-            } catch (Exception ignore) {}
-            if (paramName != null && properties.getFilter().getWhitelistParameters().contains(paramName)) {
-                return value;
-            }
             List<String> apiPatterns = properties.getJson().getApiPatterns();
-            boolean isApi = isApiRequest(apiPatterns);
+            boolean isApi = xssUtils.isApiRequest(getRequestURI(), apiPatterns);
             try {
                 if (isApi) {
                     return xssUtils.strictSanitize(value);
@@ -271,31 +314,10 @@ public class XssShieldAutoConfiguration {
                 if (onError == XssShieldProperties.OnError.LOG_AND_CONTINUE) {
                     log.error("XSS sanitization failed. Returning original value.", ex);
                 }
+                // RETURN_ORIGINAL: just return the original silently
                 return value;
             }
         }
 
-        private String getParameterNameFromStack() {
-            // This is a heuristic and not guaranteed; left simple to avoid heavy wrapping
-            // If needed, users should rely on JSON whitelist annotation support or explicit config
-            return null;
-        }
-
-        private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
-
-        private boolean isApiRequest(List<String> apiPatterns) {
-            String requestURI = getRequestURI();
-            if (requestURI == null || apiPatterns == null || apiPatterns.isEmpty()) {
-                return false;
-            }
-            for (String pattern : apiPatterns) {
-                if (pattern == null || pattern.isEmpty()) continue;
-                String p = pattern.trim();
-                if (PATH_MATCHER.match(p, requestURI)) {
-                    return true;
-                }
-            }
-            return false;
-        }
     }
 }

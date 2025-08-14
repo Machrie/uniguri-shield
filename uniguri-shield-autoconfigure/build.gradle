@@ -19,7 +19,6 @@ dependencies {
     implementation "org.slf4j:slf4j-api:2.0.7" 
 
     compileOnly "jakarta.servlet:jakarta.servlet-api:6.0.0"
-    compileOnly "org.springframework.boot:spring-boot-actuator"
 
     annotationProcessor "org.springframework.boot:spring-boot-configuration-processor"
 

@@ -55,7 +55,7 @@ repositories {
 dependencies {
     // JitPack이 생성한 좌표를 그대로 사용하세요.
     // 예: implementation 'com.github.YourUsername:your-repo-name:tag'
-    implementation 'com.uniguri:xss-shield-spring-boot-starter:main-SNAPSHOT'
+    implementation 'com.uniguri:uniguri-shield:main-SNAPSHOT'
 }
 ```
 
@@ -78,7 +78,7 @@ Maven 예시:
   <!-- Check JitPack page for exact coordinates -->
   <dependency>
     <groupId>com.uniguri</groupId>
-    <artifactId>xss-shield-spring-boot-starter</artifactId>
+    <artifactId>uniguri-shield</artifactId>
     <version>main-SNAPSHOT</version>
   </dependency>
   <!-- or -->
@@ -146,8 +146,8 @@ xss:
         - "/api/**"
         - "/v1/**"
         - "/v2/**"
-    pattern-detection:
-      enabled: false
+    # pattern-detection: (removed)
+    #   enabled: false
     cache:
       sanitize-enabled: false
       sanitize-max-entries: 1000
@@ -187,16 +187,26 @@ public class MyHtmlPolicyConfig {
 ### 3) API 경로 패턴 변경 / Change API Patterns
 `xss.shield.json.api-patterns`로 엄격 정책 적용 범위를 조정합니다. 예: `/api/**`, `/v1/**`.
 
+### 4) 정책 프리셋 / Policy Presets
+`xss.shield.policy-level`로 손쉽게 강도를 선택할 수 있습니다.
+
+- `STRICT`: 모든 HTML 차단 (API 응답 등)
+- `NORMAL`(기본): 일반 컨텐츠 허용 + 제한적 스타일/링크
+- `LENIENT`: 이미지/추가 속성 일부 허용
+
+예시:
+```properties
+xss.shield.policy-level=STRICT
+```
+
 ### 4) 안전 출력 헬퍼 / Safe Output Helper
 서버 사이드 템플릿에서 직접 HTML을 만들 경우, `XssUtils#toSafeOutput(String)` 사용을 고려하세요.
 
 ### 5) 모니터링 / Monitoring
-- Spring Actuator 사용 시 `/actuator/xssShield`에서 메트릭 확인 (기본 활성화, `xss.shield.actuator.enabled=true`)
-- 노출 항목: `patternDetected`, `sanitized`, `strictSanitized`, `formSanitized`, `whitelistJsonSkipped`, `whitelistParamSkipped`
+내장 Actuator 엔드포인트와 메트릭 수집 기능은 제거되었습니다. 필요한 경우 애플리케이션 레벨에서 AOP/필터 로깅으로 확장하세요.
 
 ### 6) 화이트리스트 / Whitelist
-- 요청 파라미터 화이트리스트: `xss.shield.filter.whitelist-parameters`
-- JSON 필드 어노테이션(준비됨): `@XssWhitelist` (향후 리플렉션 기반 스킵 적용 예정)
+요청 파라미터 화이트리스트 및 `@XssWhitelist`는 제거되었습니다.
 
 ---
 
@@ -204,7 +214,7 @@ public class MyHtmlPolicyConfig {
 - 가능한 경우 템플릿 엔진의 안전한 출력(예: Thymeleaf `th:text`)을 사용하세요.
 - `th:utext` 등 Raw-HTML 출력은 신중히 사용하고, 반드시 신뢰된 데이터만 허용하세요.
 - Sanitizer 정책은 화이트리스트 방식입니다. 허용 대상은 최소화하고 필요 시 점진적으로 확장하세요.
-- 필터 제외 경로는 정적 리소스/문서로 제한하고, 동적 엔드포인트는 제외하지 않는 것을 권장합니다.
+- 필터 제외 경로는 정적 리소스/문서로 제한하고, 동적 엔드포인트는 제외하지 않는 것을 권장합니다. (내부적으로 정적 확장자 빠른 체크 및 LRU 캐시를 사용합니다.)
 
 ---
 
@@ -216,8 +226,8 @@ public class MyHtmlPolicyConfig {
 ---
 
 ## 모듈 / Modules
-- `xss-shield-spring-boot-autoconfigure`: 자동 설정과 기본 구현
-- `xss-shield-spring-boot-starter`: autoconfigure 모듈만 노출하는 얇은 스타터
+- `uniguri-shield-autoconfigure` (dir: `uniguri-shield-autoconfigure`): 자동 설정과 기본 구현
+- `uniguri-shield` (dir: `uniguri-shield`): autoconfigure 모듈만 노출하는 얇은 스타터
 
 ---
 

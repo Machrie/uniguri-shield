@@ -4,8 +4,6 @@ import java.io.IOException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.uniguri.monitoring.XssShieldMetrics;
-import org.springframework.util.AntPathMatcher;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -24,11 +22,9 @@ import com.uniguri.config.XssShieldProperties;
 public class XssStringJsonDeserializer extends JsonDeserializer<String> {
 
     private static final Logger log = LoggerFactory.getLogger(XssStringJsonDeserializer.class);
-    private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
-
     private final XssUtils xssUtils;
     private final XssShieldProperties properties;
-    private final XssShieldMetrics metrics;
+    
 
     /**
      * Constructor for XssStringJsonDeserializer.
@@ -39,13 +35,6 @@ public class XssStringJsonDeserializer extends JsonDeserializer<String> {
     public XssStringJsonDeserializer(XssUtils xssUtils, XssShieldProperties properties) {
         this.xssUtils = xssUtils;
         this.properties = properties;
-        this.metrics = null; // metrics is optional
-    }
-
-    public XssStringJsonDeserializer(XssUtils xssUtils, XssShieldProperties properties, XssShieldMetrics metrics) {
-        this.xssUtils = xssUtils;
-        this.properties = properties;
-        this.metrics = metrics;
     }
 
     /**
@@ -64,58 +53,24 @@ public class XssStringJsonDeserializer extends JsonDeserializer<String> {
             return null;
         }
 
-        if (properties.getPatternDetection().isEnabled() && xssUtils.containsXssPattern(value)) {
-            log.warn("XSS pattern detected in JSON input. Sanitizing value...");
-            if (metrics != null) metrics.incrementPatternDetected();
-        }
-
         try {
-            if (isApiRequest(properties.getJson().getApiPatterns())) {
-                String sanitized = xssUtils.strictSanitize(value);
-                if (metrics != null) metrics.incrementStrictSanitized();
-                return sanitized;
+            if (xssUtils.isApiRequestForCurrentRequest(properties.getJson().getApiPatterns())) {
+                return xssUtils.strictSanitize(value);
             }
-            String sanitized = xssUtils.sanitize(value);
-            if (metrics != null) metrics.incrementSanitized();
-            return sanitized;
+            return xssUtils.sanitize(value);
         } catch (Exception ex) {
             XssShieldProperties.OnError onError = properties.getOnError();
             if (onError == XssShieldProperties.OnError.THROW_EXCEPTION) {
                 throw new IOException("XSS sanitization failed", ex);
             }
             if (onError == XssShieldProperties.OnError.LOG_AND_CONTINUE) {
-                log.error("XSS sanitization failed. Returning original value.", ex);
+                String uri = xssUtils.getCurrentRequestUri();
+                String ip = xssUtils.getCurrentClientIp();
+                log.error("XSS sanitization failed. Returning original value. URI: {}, IP: {}", uri, ip, ex);
             }
+            // RETURN_ORIGINAL: just return original silently
             return value;
         }
-    }
-
-    /**
-     * Checks if the current request is an API request based on configured patterns.
-     *
-     * @param apiPatterns The API patterns to check against. / 확인할 API 패턴 목록
-     * @return true if it is an API request, false otherwise. / API 요청이면 true, 그렇지 않으면 false
-     */
-    private boolean isApiRequest(java.util.List<String> apiPatterns) {
-        if (apiPatterns == null || apiPatterns.isEmpty()) {
-            return false;
-        }
-        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-        if (attributes == null) {
-            return false;
-        }
-        String requestURI = attributes.getRequest().getRequestURI();
-        if (requestURI == null) {
-            return false;
-        }
-        for (String pattern : apiPatterns) {
-            if (pattern == null || pattern.isEmpty()) continue;
-            String trimmed = pattern.trim();
-            if (PATH_MATCHER.match(trimmed, requestURI)) {
-                return true;
-            }
-        }
-        return false;
     }
 }
 

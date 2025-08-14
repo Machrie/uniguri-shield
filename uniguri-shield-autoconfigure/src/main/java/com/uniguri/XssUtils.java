@@ -4,6 +4,9 @@ import org.owasp.html.PolicyFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.uniguri.config.XssShieldProperties;
+import org.springframework.util.AntPathMatcher;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.util.HtmlUtils;
 
 import java.util.regex.Matcher;
@@ -56,6 +59,7 @@ public class XssUtils {
     private final java.util.concurrent.ConcurrentHashMap<String, String> sanitizeCache = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentHashMap<String, String> strictSanitizeCache = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentHashMap<String, String> formInputSanitizeCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
 
     /**
      * Constructor for XssUtils.
@@ -197,7 +201,9 @@ public class XssUtils {
         for (Pattern pattern : XSS_PATTERNS) {
             Matcher matcher = pattern.matcher(decodedInput);
             if (matcher.find()) {
-                log.warn("XSS pattern detected by: {}", pattern.pattern());
+                String uri = getCurrentRequestUri();
+                String ip = getCurrentClientIp();
+                log.warn("XSS detected - URI: {}, IP: {}, Pattern: {}", uri, ip, pattern.pattern());
                 return true;
             }
         }
@@ -236,6 +242,70 @@ public class XssUtils {
         }
         String cleaned = sanitize(input);
         return escape(cleaned);
+    }
+
+    /**
+     * Checks if the given request URI matches any of the provided API patterns.
+     * <p>
+     * 주어진 요청 URI가 API 패턴과 일치하는지 확인합니다.
+     */
+    public boolean isApiRequest(String requestUri, java.util.List<String> apiPatterns) {
+        if (requestUri == null || apiPatterns == null || apiPatterns.isEmpty()) {
+            return false;
+        }
+        for (String pattern : apiPatterns) {
+            if (pattern == null || pattern.isEmpty()) continue;
+            String trimmed = pattern.trim();
+            if (PATH_MATCHER.match(trimmed, requestUri)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Checks if the current HTTP request matches API patterns.
+     * <p>
+     * 현재 HTTP 요청이 API 패턴과 일치하는지 확인합니다.
+     */
+    public boolean isApiRequestForCurrentRequest(java.util.List<String> apiPatterns) {
+        String uri = getCurrentRequestUri();
+        return isApiRequest(uri, apiPatterns);
+    }
+
+    /**
+     * Returns the current request URI when available.
+     * <p>
+     * 현재 요청 URI를 반환합니다.
+     */
+    public String getCurrentRequestUri() {
+        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        if (attributes == null) return null;
+        try {
+            return attributes.getRequest().getRequestURI();
+        } catch (Exception ignore) {
+            return null;
+        }
+    }
+
+    /**
+     * Returns the client IP from current request when available.
+     * <p>
+     * 현재 요청에서 클라이언트 IP를 반환합니다.
+     */
+    public String getCurrentClientIp() {
+        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        if (attributes == null) return null;
+        try {
+            String ip = attributes.getRequest().getHeader("X-Forwarded-For");
+            if (ip != null && !ip.isBlank()) {
+                int idx = ip.indexOf(',');
+                return idx > 0 ? ip.substring(0, idx).trim() : ip.trim();
+            }
+            return attributes.getRequest().getRemoteAddr();
+        } catch (Exception ignore) {
+            return null;
+        }
     }
 }
 
