@@ -5,26 +5,28 @@
 ---
 
 ### 1) 소개 (KR)
-uniguri-shield는 Spring Boot 3.x 애플리케이션에서 XSS 방어를 손쉽게 적용하는 스타터 라이브러리입니다. Servlet 필터, Jackson 역직렬화, OWASP Java HTML Sanitizer 정책을 자동 구성하여 폼 입력/JSON/API 요청에 최적화된 보안 정책을 제공합니다.
+uniguri-shield는 Spring Boot 3.x 애플리케이션에서 XSS(Cross-Site Scripting) 공격을 손쉽게 방어하는 스타터 라이브러리입니다. Servlet 필터, Jackson 역직렬화, OWASP Java HTML Sanitizer 정책을 자동으로 구성하여 폼 입력, JSON 페이로드, API 요청에 대한 최적화된 보안 정책을 제공합니다.
 
-- 자동 구성 기반 간편 적용 (Spring Boot Auto-Configuration)
-- OWASP Java HTML Sanitizer 기본 정책 제공 및 사용자 정의로 덮어쓰기 가능
-- Servlet Filter + Jackson String Deserializer의 이중 방어
-- `application.yml`로 On/Off, 경로/패턴, API 접두사 등 세밀 제어
+- **자동 구성 기반의 간편한 적용**: 의존성 추가만으로 즉시 활성화됩니다.
+- **이중 방어 체계**: 서블릿 필터(폼 데이터)와 Jackson Deserializer(JSON)를 통해 모든 요청 경로를 보호합니다.
+- **OWASP Java HTML Sanitizer**: 신뢰성 높은 OWASP 라이브러리를 기반으로 안전한 HTML 처리 정책을 제공하며, 사용자 정의가 가능합니다.
+- **세밀한 제어**: `application.yml`을 통해 기능 활성화 여부, 필터 제외 경로, API 접두사 등을 손쉽게 제어할 수 있습니다.
+- **강화된 탐지 로직**: 정규식을 이용한 패턴 매칭으로 인코딩된 공격이나 다양한 우회 시도를 탐지합니다.
 
-요구사항: Java 17+, Spring Boot 3.x (Jakarta Servlet 6)
+요구사항: Java 17+, Spring Boot 3.x
 
 ---
 
 ### 1) Overview (EN)
-uniguri-shield is a Spring Boot starter to apply robust XSS protection with minimal effort. It auto-configures a Servlet filter, a Jackson String deserializer, and OWASP Java HTML Sanitizer policies to secure form inputs, JSON payloads, and API requests.
+uniguri-shield is a Spring Boot starter designed to effortlessly apply robust Cross-Site Scripting (XSS) protection to your 3.x application. It auto-configures a Servlet filter, a Jackson String deserializer, and OWASP Java HTML Sanitizer policies to provide optimized security for form inputs, JSON payloads, and API requests.
 
-- Easy to use via Spring Boot Auto-Configuration
-- Default OWASP Java HTML Sanitizer policies with user-overridable beans
-- Dual protection: Servlet Filter + Jackson String Deserializer
-- Fine-grained controls via `application.yml` (on/off, URL patterns, API prefix)
+- **Effortless Integration**: Activates instantly just by adding the dependency.
+- **Dual-Layered Defense**: Protects all request paths through a Servlet Filter (for form data) and a Jackson Deserializer (for JSON).
+- **OWASP Java HTML Sanitizer**: Provides reliable HTML sanitization policies based on the trusted OWASP library, which can be easily customized.
+- **Fine-Grained Control**: Easily control features, exclusion patterns, API prefixes, and more via `application.yml`.
+- **Enhanced Detection Logic**: Detects encoded attacks and various evasion techniques using regular expression-based pattern matching.
 
-Requirements: Java 17+, Spring Boot 3.x (Jakarta Servlet 6)
+Requirements: Java 17+, Spring Boot 3.x
 
 ---
 
@@ -33,27 +35,27 @@ Requirements: Java 17+, Spring Boot 3.x (Jakarta Servlet 6)
 1) 프로젝트를 GitHub 공개 저장소로 푸시한 뒤 [`jitpack.io`](https://jitpack.io)에서 리포지토리를 조회합니다.
 2) JitPack이 제공하는 좌측 Gradle/Maven 스니펫을 사용하세요. 아래는 예시입니다.
 
-Gradle (Kotlin DSL) 예시:
-```kotlin
-// settings.gradle.kts
+Gradle (Groovy DSL) 예시:
+```groovy
+// settings.gradle
 pluginManagement {
     repositories {
         gradlePluginPortal()
-        maven("https://jitpack.io")
+        maven { url 'https://jitpack.io' }
     }
 }
+rootProject.name = 'your-project-name'
 
-// build.gradle.kts (root or module)
+// build.gradle (root or module)
 repositories {
-    maven("https://jitpack.io")
+    mavenCentral()
+    maven { url 'https://jitpack.io' }
 }
 
 dependencies {
-    // JitPack가 생성한 좌표를 그대로 사용하세요.
-    // 예: com.uniguri:xss-shield-spring-boot-starter:<version>
-    implementation("com.uniguri:xss-shield-spring-boot-starter:<version>")
-    // 또는 JitPack 기본 그룹을 사용하는 경우 (프로젝트 설정에 따라 달라질 수 있음)
-    // implementation("com.github.<github-user>:uniguri-shield:<tag>")
+    // JitPack이 생성한 좌표를 그대로 사용하세요.
+    // 예: implementation 'com.github.YourUsername:your-repo-name:tag'
+    implementation 'com.uniguri:xss-shield-spring-boot-starter:main-SNAPSHOT'
 }
 ```
 
@@ -77,14 +79,14 @@ Maven 예시:
   <dependency>
     <groupId>com.uniguri</groupId>
     <artifactId>xss-shield-spring-boot-starter</artifactId>
-    <version>RELEASE_TAG_OR_VERSION</version>
+    <version>main-SNAPSHOT</version>
   </dependency>
   <!-- or -->
   <!--
   <dependency>
-    <groupId>com.github.&lt;github-user&gt;</groupId>
+    <groupId>com.github.<github-user></groupId>
     <artifactId>uniguri-shield</artifactId>
-    <version>&lt;tag&gt;</version>
+    <version><tag></version>
   </dependency>
   -->
 </dependencies>

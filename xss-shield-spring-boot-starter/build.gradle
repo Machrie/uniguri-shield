@@ -1,5 +1,5 @@
 plugins {
-    `java-library`
+    id "java-library"
 }
 
 java {
@@ -11,5 +11,7 @@ group = "com.uniguri"
 version = rootProject.version
 
 dependencies {
-    api(project(":xss-shield-spring-boot-autoconfigure"))
+    api project(":xss-shield-spring-boot-autoconfigure")
 }
+
+
