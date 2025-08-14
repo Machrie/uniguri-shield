@@ -10,7 +10,7 @@ uniguri-shield는 Spring Boot 3.x 애플리케이션에서 XSS(Cross-Site Script
 - **자동 구성 기반의 간편한 적용**: 의존성 추가만으로 즉시 활성화됩니다.
 - **이중 방어 체계**: 서블릿 필터(폼 데이터)와 Jackson Deserializer(JSON)를 통해 모든 요청 경로를 보호합니다.
 - **OWASP Java HTML Sanitizer**: 신뢰성 높은 OWASP 라이브러리를 기반으로 안전한 HTML 처리 정책을 제공하며, 사용자 정의가 가능합니다.
-- **세밀한 제어**: `application.yml`을 통해 기능 활성화 여부, 필터 제외 경로, API 접두사 등을 손쉽게 제어할 수 있습니다.
+- **세밀한 제어**: `application.yml`을 통해 기능 활성화 여부, 필터 제외 경로, API 패턴, 예외 정책 등을 손쉽게 제어할 수 있습니다.
 - **강화된 탐지 로직**: 정규식을 이용한 패턴 매칭으로 인코딩된 공격이나 다양한 우회 시도를 탐지합니다.
 
 요구사항: Java 17+, Spring Boot 3.x
@@ -108,6 +108,7 @@ xss:
     enabled: true
     filter:
       enabled: true
+      order: 110
       exclude-patterns:
         - /static/**
         - /assets/**
@@ -141,7 +142,16 @@ xss:
         - "**/*.ico"
     json:
       enabled: true
-      api-prefix: /api/
+      api-patterns:
+        - "/api/**"
+        - "/v1/**"
+        - "/v2/**"
+    pattern-detection:
+      enabled: false
+    cache:
+      sanitize-enabled: false
+      sanitize-max-entries: 1000
+    on-error: LOG_AND_CONTINUE # THROW_EXCEPTION | RETURN_ORIGINAL
 ```
 
 동작 개요:
@@ -154,12 +164,12 @@ xss:
 ## 고급 사용 / Advanced Usage
 
 ### 1) Sanitizer 정책 커스터마이징 (Override Beans)
-`@Bean` 이름으로 `htmlSanitizer`, `strictHtmlSanitizer`, `formInputSanitizer`를 제공하면 기본 정책을 덮어쓸 수 있습니다.
+`@Bean` 이름으로 `xssShieldHtmlSanitizer`, `xssShieldStrictHtmlSanitizer`, `xssShieldFormInputSanitizer`를 제공하면 기본 정책을 덮어쓸 수 있습니다.
 
 ```java
 @Configuration
 public class MyHtmlPolicyConfig {
-    @Bean("htmlSanitizer")
+    @Bean("xssShieldHtmlSanitizer")
     public PolicyFactory htmlSanitizer() {
         return new HtmlPolicyBuilder()
             .allowElements("p", "strong", "em")
@@ -174,11 +184,19 @@ public class MyHtmlPolicyConfig {
 - 필터 비활성화: `xss.shield.filter.enabled=false`
 - JSON 역직렬화 비활성화: `xss.shield.json.enabled=false`
 
-### 3) API 접두사 변경 / Change API Prefix
-`xss.shield.json.api-prefix`로 엄격 정책 적용 범위를 조정합니다. 예: `/v1/api/`.
+### 3) API 경로 패턴 변경 / Change API Patterns
+`xss.shield.json.api-patterns`로 엄격 정책 적용 범위를 조정합니다. 예: `/api/**`, `/v1/**`.
 
 ### 4) 안전 출력 헬퍼 / Safe Output Helper
 서버 사이드 템플릿에서 직접 HTML을 만들 경우, `XssUtils#toSafeOutput(String)` 사용을 고려하세요.
+
+### 5) 모니터링 / Monitoring
+- Spring Actuator 사용 시 `/actuator/xssShield`에서 메트릭 확인 (기본 활성화, `xss.shield.actuator.enabled=true`)
+- 노출 항목: `patternDetected`, `sanitized`, `strictSanitized`, `formSanitized`, `whitelistJsonSkipped`, `whitelistParamSkipped`
+
+### 6) 화이트리스트 / Whitelist
+- 요청 파라미터 화이트리스트: `xss.shield.filter.whitelist-parameters`
+- JSON 필드 어노테이션(준비됨): `@XssWhitelist` (향후 리플렉션 기반 스킵 적용 예정)
 
 ---
 

@@ -3,7 +3,7 @@ package com.uniguri;
 import org.owasp.html.PolicyFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
+import com.uniguri.config.XssShieldProperties;
 import org.springframework.web.util.HtmlUtils;
 
 import java.util.regex.Matcher;
@@ -51,6 +51,12 @@ public class XssUtils {
     private final PolicyFactory strictHtmlSanitizer;
     private final PolicyFactory formInputSanitizer;
 
+    private final boolean sanitizeCacheEnabled;
+    private final int sanitizeCacheMaxEntries;
+    private final java.util.concurrent.ConcurrentHashMap<String, String> sanitizeCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentHashMap<String, String> strictSanitizeCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentHashMap<String, String> formInputSanitizeCache = new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
      * Constructor for XssUtils.
      *
@@ -59,12 +65,31 @@ public class XssUtils {
      * @param formInputSanitizer  Policy for form input sanitization. / 폼 입력 살균 정책
      */
     public XssUtils(
-            @Qualifier("htmlSanitizer") PolicyFactory htmlSanitizer,
-            @Qualifier("strictHtmlSanitizer") PolicyFactory strictHtmlSanitizer,
-            @Qualifier("formInputSanitizer") PolicyFactory formInputSanitizer) {
+            PolicyFactory htmlSanitizer,
+            PolicyFactory strictHtmlSanitizer,
+            PolicyFactory formInputSanitizer) {
         this.htmlSanitizer = htmlSanitizer;
         this.strictHtmlSanitizer = strictHtmlSanitizer;
         this.formInputSanitizer = formInputSanitizer;
+        this.sanitizeCacheEnabled = false;
+        this.sanitizeCacheMaxEntries = 1000;
+    }
+
+    /**
+     * Constructor with configuration properties to enable optional caches.
+     * <p>
+     * 선택적 캐시 활성화를 위한 프로퍼티를 포함하는 생성자입니다.
+     */
+    public XssUtils(
+            PolicyFactory htmlSanitizer,
+            PolicyFactory strictHtmlSanitizer,
+            PolicyFactory formInputSanitizer,
+            XssShieldProperties properties) {
+        this.htmlSanitizer = htmlSanitizer;
+        this.strictHtmlSanitizer = strictHtmlSanitizer;
+        this.formInputSanitizer = formInputSanitizer;
+        this.sanitizeCacheEnabled = properties != null && properties.getCache() != null && properties.getCache().isSanitizeEnabled();
+        this.sanitizeCacheMaxEntries = properties != null && properties.getCache() != null ? properties.getCache().getSanitizeMaxEntries() : 1000;
     }
 
     /**
@@ -76,6 +101,13 @@ public class XssUtils {
     public String sanitize(String input) {
         if (input == null) {
             return null;
+        }
+        if (sanitizeCacheEnabled) {
+            String cached = sanitizeCache.get(input);
+            if (cached != null) return cached;
+            String result = htmlSanitizer.sanitize(input);
+            putWithLimit(sanitizeCache, input, result);
+            return result;
         }
         return htmlSanitizer.sanitize(input);
     }
@@ -90,6 +122,13 @@ public class XssUtils {
         if (input == null) {
             return null;
         }
+        if (sanitizeCacheEnabled) {
+            String cached = strictSanitizeCache.get(input);
+            if (cached != null) return cached;
+            String result = strictHtmlSanitizer.sanitize(input);
+            putWithLimit(strictSanitizeCache, input, result);
+            return result;
+        }
         return strictHtmlSanitizer.sanitize(input);
     }
 
@@ -103,7 +142,21 @@ public class XssUtils {
         if (input == null) {
             return null;
         }
+        if (sanitizeCacheEnabled) {
+            String cached = formInputSanitizeCache.get(input);
+            if (cached != null) return cached;
+            String result = formInputSanitizer.sanitize(input);
+            putWithLimit(formInputSanitizeCache, input, result);
+            return result;
+        }
         return formInputSanitizer.sanitize(input);
+    }
+
+    private void putWithLimit(java.util.concurrent.ConcurrentHashMap<String, String> cache, String key, String value) {
+        if (cache.size() >= sanitizeCacheMaxEntries) {
+            cache.clear();
+        }
+        cache.put(key, value);
     }
 
     /**

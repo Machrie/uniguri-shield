@@ -7,6 +7,7 @@ import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 
 /**
  * XSS Shield properties.
@@ -43,6 +44,28 @@ public class XssShieldProperties {
      */
     private final JsonConfig json = new JsonConfig();
 
+    /**
+     * Configuration for XSS pattern detection (logging/monitoring only).
+     * <p>
+     * XSS 패턴 탐지(로깅/모니터링 전용) 설정입니다.
+     */
+    private final PatternDetectionConfig patternDetection = new PatternDetectionConfig();
+
+    /**
+     * Configuration for caching strategies.
+     * <p>
+     * 캐싱 전략 설정입니다.
+     */
+    private final CacheConfig cache = new CacheConfig();
+
+    /**
+     * Error handling policy when sanitization fails.
+     * <p>
+     * 살균 과정에서 예외 발생 시 동작 정책입니다.
+     * 기본값: LOG_AND_CONTINUE
+     */
+    private OnError onError = OnError.LOG_AND_CONTINUE;
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -57,6 +80,22 @@ public class XssShieldProperties {
 
     public JsonConfig getJson() {
         return json;
+    }
+
+    public PatternDetectionConfig getPatternDetection() {
+        return patternDetection;
+    }
+
+    public CacheConfig getCache() {
+        return cache;
+    }
+
+    public OnError getOnError() {
+        return onError;
+    }
+
+    public void setOnError(OnError onError) {
+        this.onError = onError;
     }
 
     /**
@@ -75,6 +114,13 @@ public class XssShieldProperties {
          * 서블릿 필터 기능을 활성화하거나 비활성화합니다. (기본값: true)
          */
         private boolean enabled = true;
+
+        /**
+         * Order of the XSS filter in the filter chain.
+         * <p>
+         * XSS 필터의 체인 내 우선순위입니다. (기본값: Ordered.HIGHEST_PRECEDENCE + 100)
+         */
+        private int order = Ordered.HIGHEST_PRECEDENCE + 100;
 
         /**
          * A list of URL patterns to be excluded from XSS filtering (supports Ant-style patterns).
@@ -116,6 +162,13 @@ public class XssShieldProperties {
             )
         );
 
+        /**
+         * A list of request parameter names to skip sanitization for.
+         * <p>
+         * 살균을 제외할 요청 파라미터 이름 목록입니다.
+         */
+        private List<String> whitelistParameters = new ArrayList<>();
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -130,6 +183,22 @@ public class XssShieldProperties {
 
         public void setExcludePatterns(List<String> excludePatterns) {
             this.excludePatterns = excludePatterns;
+        }
+
+        public List<String> getWhitelistParameters() {
+            return whitelistParameters;
+        }
+
+        public void setWhitelistParameters(List<String> whitelistParameters) {
+            this.whitelistParameters = whitelistParameters;
+        }
+
+        public int getOrder() {
+            return order;
+        }
+
+        public void setOrder(int order) {
+            this.order = order;
         }
     }
 
@@ -148,11 +217,19 @@ public class XssShieldProperties {
         private boolean enabled = true;
 
         /**
-         * The URL prefix for API endpoints where a strict sanitization policy should be applied.
+         * The URL patterns for API endpoints where a strict sanitization policy should be applied.
+         * Supports Ant-style patterns like "/api/**".
          * <p>
-         * 엄격한 살균 정책을 적용할 API 엔드포인트의 URL 접두사입니다. (기본값: /api/)
+         * 엄격한 살균 정책을 적용할 API 엔드포인트의 URL 패턴 목록입니다. Ant 스타일 패턴을 지원합니다.
+         * (기본값: ["/api/**", "/v1/**", "/v2/**"])
          */
-        private String apiPrefix = "/api/";
+        private List<String> apiPatterns = new ArrayList<>(
+            Arrays.asList(
+                "/api/**",
+                "/v1/**",
+                "/v2/**"
+            )
+        );
 
         public boolean isEnabled() {
             return enabled;
@@ -162,13 +239,85 @@ public class XssShieldProperties {
             this.enabled = enabled;
         }
 
-        public String getApiPrefix() {
-            return apiPrefix;
+        public List<String> getApiPatterns() {
+            return apiPatterns;
         }
 
-        public void setApiPrefix(String apiPrefix) {
-            this.apiPrefix = apiPrefix;
+        public void setApiPatterns(List<String> apiPatterns) {
+            this.apiPatterns = apiPatterns;
         }
+    }
+
+    /**
+     * Pattern detection configuration.
+     * <p>
+     * 패턴 탐지 설정입니다.
+     */
+    public static class PatternDetectionConfig {
+        /**
+         * Enables logging/monitoring of XSS pattern detection.
+         * Does not affect sanitization behavior.
+         * <p>
+         * XSS 패턴 탐지 로깅/모니터링을 활성화합니다.
+         * 살균 동작에는 영향을 주지 않습니다. (기본값: false)
+         */
+        private boolean enabled = false;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+    }
+
+    /**
+     * Caching configuration.
+     * <p>
+     * 캐싱 설정입니다.
+     */
+    public static class CacheConfig {
+        /**
+         * Enables caching of sanitize results.
+         * <p>
+         * sanitize 결과 캐싱을 활성화합니다. (기본값: false)
+         */
+        private boolean sanitizeEnabled = false;
+
+        /**
+         * Maximum number of entries to keep per sanitize cache.
+         * <p>
+         * sanitize 캐시별 최대 엔트리 수입니다. (기본값: 1000)
+         */
+        private int sanitizeMaxEntries = 1000;
+
+        public boolean isSanitizeEnabled() {
+            return sanitizeEnabled;
+        }
+
+        public void setSanitizeEnabled(boolean sanitizeEnabled) {
+            this.sanitizeEnabled = sanitizeEnabled;
+        }
+
+        public int getSanitizeMaxEntries() {
+            return sanitizeMaxEntries;
+        }
+
+        public void setSanitizeMaxEntries(int sanitizeMaxEntries) {
+            this.sanitizeMaxEntries = sanitizeMaxEntries;
+        }
+    }
+
+    /**
+     * Error handling policy for sanitization failures.
+     * <p>
+     * 살균 실패 시 동작 정책.
+     */
+    public enum OnError {
+        LOG_AND_CONTINUE,
+        THROW_EXCEPTION,
+        RETURN_ORIGINAL
     }
 }
 

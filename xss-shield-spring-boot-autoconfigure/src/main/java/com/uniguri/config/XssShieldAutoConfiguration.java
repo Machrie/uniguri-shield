@@ -11,6 +11,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import org.owasp.html.HtmlPolicyBuilder;
 import org.owasp.html.PolicyFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -50,11 +51,26 @@ public class XssShieldAutoConfiguration {
      * @param formInputSanitizer  폼 입력용 Sanitizer
      * @return XssUtils 인스턴스
      */
-    @Bean
+    @Bean("xssShieldXssUtils")
     @ConditionalOnMissingBean
-    public XssUtils xssUtils(PolicyFactory htmlSanitizer, PolicyFactory strictHtmlSanitizer, PolicyFactory formInputSanitizer) {
+    public XssUtils xssUtils(
+            @Qualifier("xssShieldHtmlSanitizer") PolicyFactory htmlSanitizer,
+            @Qualifier("xssShieldStrictHtmlSanitizer") PolicyFactory strictHtmlSanitizer,
+            @Qualifier("xssShieldFormInputSanitizer") PolicyFactory formInputSanitizer,
+            XssShieldProperties properties) {
         log.info("Initializing XssUtils bean.");
-        return new XssUtils(htmlSanitizer, strictHtmlSanitizer, formInputSanitizer);
+        return new XssUtils(htmlSanitizer, strictHtmlSanitizer, formInputSanitizer, properties);
+    }
+
+    /**
+     * AntPathMatcher singleton bean for path matching.
+     * <p>
+     * 경로 매칭을 위한 AntPathMatcher 싱글톤 빈입니다.
+     */
+    @Bean("xssShieldAntPathMatcher")
+    @ConditionalOnMissingBean(name = "xssShieldAntPathMatcher")
+    public AntPathMatcher antPathMatcher() {
+        return new AntPathMatcher();
     }
 
     /**
@@ -65,15 +81,15 @@ public class XssShieldAutoConfiguration {
      * @param properties XSS 설정 프로퍼티
      * @return FilterRegistrationBean 인스턴스
      */
-    @Bean
+    @Bean("xssShieldCustomXssFilter")
     @ConditionalOnProperty(prefix = "xss.shield.filter", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public FilterRegistrationBean<Filter> customXssFilter(XssUtils xssUtils, XssShieldProperties properties) {
+    public FilterRegistrationBean<Filter> customXssFilter(XssUtils xssUtils, XssShieldProperties properties, @Qualifier("xssShieldAntPathMatcher") AntPathMatcher antPathMatcher) {
         log.info("Registering CustomXssFilter.");
         FilterRegistrationBean<Filter> registration = new FilterRegistrationBean<>();
-        registration.setFilter(new CustomXssFilter(xssUtils, properties));
-        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 100);
+        registration.setFilter(new CustomXssFilter(xssUtils, properties, antPathMatcher));
+        registration.setOrder(properties.getFilter().getOrder());
         registration.addUrlPatterns("/*");
-        registration.setName("customXssFilter");
+        registration.setName("xssShieldCustomXssFilter");
         return registration;
     }
 
@@ -85,7 +101,7 @@ public class XssShieldAutoConfiguration {
      * @param properties XSS 설정 프로퍼티
      * @return Jackson2ObjectMapperBuilderCustomizer 인스턴스
      */
-    @Bean
+    @Bean("xssShieldJacksonCustomizer")
     @ConditionalOnProperty(prefix = "xss.shield.json", name = "enabled", havingValue = "true", matchIfMissing = true)
     public Jackson2ObjectMapperBuilderCustomizer jackson2ObjectMapperBuilderCustomizer(XssUtils xssUtils, XssShieldProperties properties) {
         log.info("Registering JacksonXssConfig customizer.");
@@ -101,8 +117,8 @@ public class XssShieldAutoConfiguration {
      *
      * @return PolicyFactory 인스턴스
      */
-    @Bean("htmlSanitizer")
-    @ConditionalOnMissingBean(name = "htmlSanitizer")
+    @Bean("xssShieldHtmlSanitizer")
+    @ConditionalOnMissingBean(name = "xssShieldHtmlSanitizer")
     public PolicyFactory htmlSanitizer() {
         log.info("Initializing 'htmlSanitizer' bean.");
         return new HtmlPolicyBuilder()
@@ -128,8 +144,8 @@ public class XssShieldAutoConfiguration {
      *
      * @return PolicyFactory 인스턴스
      */
-    @Bean("strictHtmlSanitizer")
-    @ConditionalOnMissingBean(name = "strictHtmlSanitizer")
+    @Bean("xssShieldStrictHtmlSanitizer")
+    @ConditionalOnMissingBean(name = "xssShieldStrictHtmlSanitizer")
     public PolicyFactory strictHtmlSanitizer() {
         log.info("Initializing 'strictHtmlSanitizer' bean.");
         return new HtmlPolicyBuilder().toFactory();
@@ -141,8 +157,8 @@ public class XssShieldAutoConfiguration {
      *
      * @return PolicyFactory 인스턴스
      */
-    @Bean("formInputSanitizer")
-    @ConditionalOnMissingBean(name = "formInputSanitizer")
+    @Bean("xssShieldFormInputSanitizer")
+    @ConditionalOnMissingBean(name = "xssShieldFormInputSanitizer")
     public PolicyFactory formInputSanitizer() {
         log.info("Initializing 'formInputSanitizer' bean.");
         return new HtmlPolicyBuilder()
@@ -153,21 +169,19 @@ public class XssShieldAutoConfiguration {
     static class CustomXssFilter implements Filter {
         private final XssUtils xssUtils;
         private final XssShieldProperties properties;
-        private final AntPathMatcher pathMatcher = new AntPathMatcher();
+        private final AntPathMatcher pathMatcher;
+        private final java.util.concurrent.ConcurrentHashMap<String, Boolean> excludeCache = new java.util.concurrent.ConcurrentHashMap<>();
 
-        CustomXssFilter(XssUtils xssUtils, XssShieldProperties properties) {
+        CustomXssFilter(XssUtils xssUtils, XssShieldProperties properties, AntPathMatcher pathMatcher) {
             this.xssUtils = xssUtils;
             this.properties = properties;
+            this.pathMatcher = pathMatcher;
         }
 
         @Override
         public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
                 throws IOException, ServletException {
-            
-            RequestInfoHolder.setRequestURI(((HttpServletRequest) request).getRequestURI());
-
-            try {
-                if (request instanceof HttpServletRequest httpRequest) {
+            if (request instanceof HttpServletRequest httpRequest) {
                     String requestURI = httpRequest.getRequestURI();
                     if (shouldSkipFiltering(requestURI, properties.getFilter().getExcludePatterns())) {
                         chain.doFilter(request, response);
@@ -176,22 +190,29 @@ public class XssShieldAutoConfiguration {
 
                     XssRequestWrapper wrappedRequest = new XssRequestWrapper(httpRequest, xssUtils, properties);
                     chain.doFilter(wrappedRequest, response);
-                } else {
-                    chain.doFilter(request, response);
-                }
-            } finally {
-                RequestInfoHolder.clear();
+            } else {
+                chain.doFilter(request, response);
             }
         }
 
         private boolean shouldSkipFiltering(String requestURI, List<String> patterns) {
             if (requestURI == null) return false;
             if (patterns == null || patterns.isEmpty()) return false;
-
+            Boolean cached = excludeCache.get(requestURI);
+            if (cached != null) {
+                return cached;
+            }
             for (String pattern : patterns) {
                 if (pattern == null || pattern.isEmpty()) continue;
                 String p = pattern.trim();
-                if (pathMatcher.match(p, requestURI)) return true;
+                if (pathMatcher.match(p, requestURI)) {
+                    excludeCache.put(requestURI, true);
+                    return true;
+                }
+            }
+            excludeCache.put(requestURI, false);
+            if (excludeCache.size() > 10000) {
+                excludeCache.clear();
             }
             return false;
         }
@@ -226,17 +247,55 @@ public class XssShieldAutoConfiguration {
 
         private String sanitizeValue(String value) {
             if (value == null) return null;
-            String apiPrefix = properties.getJson().getApiPrefix();
-            boolean isApi = isApiRequest(apiPrefix);
-            if (isApi) {
-                return xssUtils.strictSanitize(value);
+            // Whitelist parameter names skip
+            String paramName = null;
+            try {
+                // best-effort extraction
+                paramName = getParameterNameFromStack();
+            } catch (Exception ignore) {}
+            if (paramName != null && properties.getFilter().getWhitelistParameters().contains(paramName)) {
+                return value;
             }
-            return xssUtils.sanitizeFormInput(value);
+            List<String> apiPatterns = properties.getJson().getApiPatterns();
+            boolean isApi = isApiRequest(apiPatterns);
+            try {
+                if (isApi) {
+                    return xssUtils.strictSanitize(value);
+                }
+                return xssUtils.sanitizeFormInput(value);
+            } catch (Exception ex) {
+                XssShieldProperties.OnError onError = properties.getOnError();
+                if (onError == XssShieldProperties.OnError.THROW_EXCEPTION) {
+                    throw new RuntimeException("XSS sanitization failed", ex);
+                }
+                if (onError == XssShieldProperties.OnError.LOG_AND_CONTINUE) {
+                    log.error("XSS sanitization failed. Returning original value.", ex);
+                }
+                return value;
+            }
         }
 
-        private boolean isApiRequest(String apiPrefix) {
+        private String getParameterNameFromStack() {
+            // This is a heuristic and not guaranteed; left simple to avoid heavy wrapping
+            // If needed, users should rely on JSON whitelist annotation support or explicit config
+            return null;
+        }
+
+        private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
+
+        private boolean isApiRequest(List<String> apiPatterns) {
             String requestURI = getRequestURI();
-            return requestURI != null && apiPrefix != null && !apiPrefix.isEmpty() && requestURI.startsWith(apiPrefix);
+            if (requestURI == null || apiPatterns == null || apiPatterns.isEmpty()) {
+                return false;
+            }
+            for (String pattern : apiPatterns) {
+                if (pattern == null || pattern.isEmpty()) continue;
+                String p = pattern.trim();
+                if (PATH_MATCHER.match(p, requestURI)) {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 }
